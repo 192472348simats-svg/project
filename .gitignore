@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Exports and generated output files
+exports/
+exports_*/
+*.pptx
+!templates/mentor_template.pptx
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / Editor settings
+.vscode/
+.idea/
+*.swp
+
+# OS generated files
+.DS_Store
+Thumbs.db
