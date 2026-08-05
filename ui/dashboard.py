@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QProgressBar, QSplitter
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QColor
 
 from core.csv_loader import CSVLoader
@@ -112,15 +112,28 @@ class DashboardView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.csv_path = ""
-        self.template_path = ""
+
+        # Pull the mentor's saved default template/export dir from Settings,
+        # if one was ever saved there - previously Settings and Dashboard
+        # never shared state, so a template chosen in Settings was silently
+        # ignored at generation time.
+        self.qsettings = QSettings()
+        saved_template = self.qsettings.value("template_path", "", type=str)
+        self.template_path = saved_template if (saved_template and os.path.exists(saved_template)) else ""
+
         self.image_folder = ""
-        self.export_dir = os.path.abspath("exports")
-        
+        self.export_dir = self.qsettings.value("export_dir", os.path.abspath("exports"), type=str)
+
         self.records = []
         self.analytics_list = []
         self.validation_result = None
 
         self._init_ui()
+
+        # Reflect the pre-loaded default template (if any) in the picker card,
+        # so the mentor can see at a glance which template will actually be used.
+        if self.template_path:
+            self.template_card.path_label.setText(os.path.basename(self.template_path))
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -483,4 +496,3 @@ class DashboardView(QWidget):
         print("="*80 + "\n", file=sys.stderr)
 
         QMessageBox.critical(self, "PowerPoint Generation Failed", err_msg)
-

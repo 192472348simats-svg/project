@@ -1,5 +1,6 @@
 import os
 import sys
+import io
 import copy
 import shutil
 import tempfile
@@ -9,7 +10,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, MSO_SHAPE_TYPE
 
 from .analytics import StudentAnalytics
 from .recommendations import RecommendationEngine
@@ -206,12 +207,15 @@ class PPTReportGenerator:
         photo_path = self.image_handler.get_student_image(analytics.reg_no, analytics.name, analytics.image_filename)
 
         # Process placeholders & fallback logic on Slide 1
-        TemplateMapper.process_slide_placeholders(
+        s1_result = TemplateMapper.process_slide_placeholders(
             slide1, analytics, student_rec,
             recent_events=self.recent_events, mentor_name=self.mentor_name, mentor_phone=self.mentor_phone,
             photo_path=photo_path
         )
-        self._populate_slide_1_fallback(slide1, analytics, student_rec, photo_path)
+        self._populate_slide_1_fallback(
+            slide1, analytics, student_rec, photo_path,
+            photo_already_placed=s1_result.get("photo_placed", False)
+        )
 
         # Process placeholders & fallback logic on Slide 2
         TemplateMapper.process_slide_placeholders(
@@ -223,9 +227,18 @@ class PPTReportGenerator:
 
         return prs
 
-    def _populate_slide_1_fallback(self, slide, analytics: StudentAnalytics, student_rec: dict, photo_path: str):
+    def _populate_slide_1_fallback(
+        self,
+        slide,
+        analytics: StudentAnalytics,
+        student_rec: dict,
+        photo_path: str,
+        photo_already_placed: bool = False
+    ):
         """
         Fallback population for Slide 1 if explicit {{PLACEHOLDER}} tags were absent.
+        Only touches the photo if it wasn't already placed via an explicit {{PHOTO}} tag,
+        to avoid inserting a duplicate, overlapping photo on the slide.
         """
         for shape in slide.shapes:
             if shape.has_table:
@@ -247,11 +260,23 @@ class PPTReportGenerator:
                 if any(k in txt for k in ["NAME", "1925", "REG", "ARUNPRASATH", "HARIPRIYA"]):
                     shape.text_frame.text = f"{analytics.name.upper()}, {analytics.reg_no}"
 
-        if photo_path and os.path.exists(photo_path):
-            try:
+        if photo_already_placed or not photo_path or not os.path.exists(photo_path):
+            return
+
+        try:
+            # Prefer the mentor's own photo placeholder shape (by size/shape),
+            # so the photo sits exactly where the mentor's template design put it.
+            target_shape = TemplateMapper.find_generic_photo_placeholder(slide)
+            if target_shape is not None:
+                left, top, width, height = target_shape.left, target_shape.top, target_shape.width, target_shape.height
+                if target_shape.has_text_frame:
+                    target_shape.text_frame.text = ""
+                slide.shapes.add_picture(photo_path, left, top, width=width, height=height)
+            else:
+                # Last-resort fixed position when no placeholder shape can be detected at all.
                 slide.shapes.add_picture(photo_path, Inches(0.8), Inches(1.8), width=Inches(3.2), height=Inches(3.8))
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     def _populate_slide_2_fallback(self, slide, analytics: StudentAnalytics):
         """
@@ -295,9 +320,22 @@ class PPTReportGenerator:
                         new_slide = combined.slides.add_slide(blank_layout)
                         for shape in slide.shapes:
                             try:
-                                el = shape.element
-                                new_el = copy.deepcopy(el)
-                                new_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
+                                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                                    # Raw XML copy only carries a relationship ID that points
+                                    # into the SOURCE file's own package, not this combined one -
+                                    # so the picture would render broken/missing here. Re-add it
+                                    # properly instead, which copies the actual image bytes into
+                                    # the combined presentation and creates a valid relationship.
+                                    image_blob = shape.image.blob
+                                    new_slide.shapes.add_picture(
+                                        io.BytesIO(image_blob),
+                                        shape.left, shape.top,
+                                        width=shape.width, height=shape.height
+                                    )
+                                else:
+                                    el = shape.element
+                                    new_el = copy.deepcopy(el)
+                                    new_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
                             except Exception:
                                 pass
                 except Exception as e:

@@ -12,6 +12,7 @@ class ImageHandler:
     def __init__(self, image_folder: Optional[str] = None):
         self.image_folder = image_folder or ""
         self.temp_dir = os.path.join(tempfile.gettempdir(), "mentor_report_avatars")
+        os.makedirs(self.temp_dir, exist_ok=True)
         self._cache = {}
 
     def set_image_folder(self, folder_path: str):

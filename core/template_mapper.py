@@ -100,6 +100,7 @@ class TemplateMapper:
         }
 
         tag_found = False
+        photo_placed = False
 
         for shape in slide.shapes:
             if shape.has_table:
@@ -118,7 +119,7 @@ class TemplateMapper:
 
                 if "{{PHOTO}}" in txt:
                     if photo_path:
-                        cls._replace_shape_with_photo(slide, shape, photo_path)
+                        photo_placed = cls._replace_shape_with_photo(slide, shape, photo_path) or photo_placed
                     continue
 
                 if "{{PARENT_REPORT}}" in txt or "{{PARENT_LETTER}}" in txt:
@@ -131,7 +132,7 @@ class TemplateMapper:
                     if tag in txt:
                         cls._replace_text_in_frame(shape.text_frame, tag, val)
 
-        return tag_found
+        return {"tag_found": tag_found, "photo_placed": photo_placed}
 
     @classmethod
     def _replace_text_in_frame(cls, text_frame, search_text: str, replace_text: str):
@@ -153,14 +154,56 @@ class TemplateMapper:
                     p.text = p.text.replace(search_text, replace_text)
 
     @classmethod
-    def _replace_shape_with_photo(cls, slide, shape, photo_path: str):
+    def _replace_shape_with_photo(cls, slide, shape, photo_path: str) -> bool:
+        """
+        Inserts the student's photo at the exact position/size of the given
+        placeholder shape (preserving the mentor's original layout), then
+        clears the placeholder's own text so no tag text leaks through.
+        Returns True if the photo was successfully inserted.
+        """
         try:
             left, top, width, height = shape.left, shape.top, shape.width, shape.height
             if shape.has_text_frame:
                 shape.text_frame.text = ""
             slide.shapes.add_picture(photo_path, left, top, width=width, height=height)
+            return True
         except Exception:
-            pass
+            return False
+
+    @classmethod
+    def find_generic_photo_placeholder(cls, slide):
+        """
+        Heuristically locates a mentor-provided photo placeholder shape when no
+        explicit {{PHOTO}} tag is present in the template. Looks for an empty
+        (no meaningful text), reasonably square-to-portrait shape of a size
+        typical for a photo slot, and returns the largest such candidate.
+        Returns None if no suitable shape is found.
+        """
+        candidates = []
+        for shape in slide.shapes:
+            try:
+                width, height = shape.width, shape.height
+            except Exception:
+                continue
+            if width is None or height is None:
+                continue
+            if width < Inches(1.2) or height < Inches(1.2):
+                continue
+            if shape.has_table:
+                continue
+            has_text = shape.has_text_frame and shape.text_frame.text.strip() != ""
+            if has_text:
+                continue
+
+            aspect = width / height
+            if 0.5 <= aspect <= 1.6:
+                candidates.append(shape)
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda s: (s.width * s.height), reverse=True)
+        return candidates[0]
 
     @classmethod
     def populate_slide_1_table(cls, table, analytics: StudentAnalytics, student_record: Dict[str, Any]):

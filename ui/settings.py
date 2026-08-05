@@ -3,17 +3,20 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QFrame, QCheckBox, QMessageBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 
 
 class SettingsView(QWidget):
     """
     Settings screen for configuring application export paths, default directories,
-    and PDF generation options.
+    and PDF generation options. Persists via QSettings so the chosen defaults
+    (especially the mentor's PowerPoint template) are actually picked up by the
+    Dashboard on next launch, instead of silently going nowhere.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.qsettings = QSettings()
         self._init_ui()
 
     def _init_ui(self):
@@ -35,7 +38,8 @@ class SettingsView(QWidget):
         l1 = QLabel("Default Export Directory:")
         l1.setStyleSheet("font-weight: bold; color: #C7D2FE;")
         h1 = QHBoxLayout()
-        self.export_path_input = QLineEdit(os.path.abspath("exports"))
+        saved_export_dir = self.qsettings.value("export_dir", os.path.abspath("exports"), type=str)
+        self.export_path_input = QLineEdit(saved_export_dir)
         btn1 = QPushButton("Browse...")
         btn1.setStyleSheet("background-color: #334155; color: white; padding: 6px 14px; border-radius: 6px;")
         btn1.clicked.connect(self._browse_export)
@@ -50,7 +54,8 @@ class SettingsView(QWidget):
         l2.setStyleSheet("font-weight: bold; color: #C7D2FE;")
         h2 = QHBoxLayout()
         default_tpl = os.path.abspath("templates/mentor_template.pptx")
-        self.template_path_input = QLineEdit(default_tpl)
+        saved_tpl = self.qsettings.value("template_path", default_tpl, type=str)
+        self.template_path_input = QLineEdit(saved_tpl)
         btn2 = QPushButton("Browse...")
         btn2.setStyleSheet("background-color: #334155; color: white; padding: 6px 14px; border-radius: 6px;")
         btn2.clicked.connect(self._browse_template)
@@ -61,8 +66,9 @@ class SettingsView(QWidget):
         card_layout.addLayout(h2)
 
         # PDF Export Checkbox
+        saved_pdf_enabled = self.qsettings.value("pdf_export_enabled", True, type=bool)
         self.pdf_chk = QCheckBox("Enable Windows PowerPoint PDF Conversion (Requires Microsoft PowerPoint COM)")
-        self.pdf_chk.setChecked(True)
+        self.pdf_chk.setChecked(saved_pdf_enabled)
         self.pdf_chk.setStyleSheet("color: #F8FAFC; font-weight: 600;")
         card_layout.addWidget(self.pdf_chk)
 
@@ -91,4 +97,15 @@ class SettingsView(QWidget):
             self.template_path_input.setText(file_path)
 
     def _save_settings(self):
-        QMessageBox.information(self, "Settings Saved", "Application settings have been updated successfully.")
+        self.qsettings.setValue("export_dir", self.export_path_input.text().strip())
+        self.qsettings.setValue("template_path", self.template_path_input.text().strip())
+        self.qsettings.setValue("pdf_export_enabled", self.pdf_chk.isChecked())
+        self.qsettings.sync()
+        QMessageBox.information(
+            self,
+            "Settings Saved",
+            "Application settings have been updated successfully.\n\n"
+            "Your default template will now be pre-selected on the Dashboard "
+            "(you can still override it per-run from the Dashboard's own "
+            "template picker)."
+        )
